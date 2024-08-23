@@ -1,0 +1,394 @@
+import numpy as np 
+import pandas as pd 
+import matplotlib.pyplot as plt
+import seaborn as sns
+import itertools
+import random
+import matplotlib.gridspec as gridspec 
+
+from sklearn.preprocessing import LabelEncoder
+
+from sklearn.model_selection import train_test_split
+from sklearn.model_selection import cross_val_score
+from sklearn.metrics import mean_absolute_error
+from sklearn.metrics import accuracy_score
+from sklearn.metrics import confusion_matrix
+from sklearn import metrics 
+
+from sklearn.preprocessing import StandardScaler
+
+from sklearn.ensemble import RandomForestClassifier
+
+from sklearn.svm import SVC
+
+
+
+from sklearn.metrics import precision_score
+from sklearn.metrics import recall_score
+from sklearn.metrics import f1_score
+from sklearn.metrics import classification_report
+import scikitplot.metrics as splt
+file_path_full_training_set = 'KDDTrain+.csv' 
+file_path_test = 'KDDTest+.csv'  
+
+df = pd.read_csv(file_path_full_training_set)
+test_df = pd.read_csv(file_path_test)
+cols = ['duration', 'protocol_type', 'service', 'flag', 'src_bytes', 'dst_bytes', 'land', 'wrong_fragment', 'urgent', 'hot', 'num_failed_logins', 'logged_in', 'num_compromised', 'root_shell', 'su_attempted', 'num_root', 'num_file_creations', 'num_shells', 'num_access_files', 'num_outbound_cmds', 'is_host_login', 'is_guest_login', 'count', 'srv_count', 'serror_rate', 'srv_serror_rate', 'rerror_rate', 'srv_rerror_rate', 'same_srv_rate', 'diff_srv_rate', 'srv_diff_host_rate', 'dst_host_count', 'dst_host_srv_count', 'dst_host_same_srv_rate', 'dst_host_diff_srv_rate', 'dst_host_same_src_port_rate', 'dst_host_srv_diff_host_rate', 'dst_host_serror_rate', 'dst_host_srv_serror_rate', 'dst_host_rerror_rate', 'dst_host_srv_rerror_rate', 'attack', 'level']
+df.columns = cols
+test_df.columns = cols
+
+df.head()
+###EDA
+df.info() 
+test_df.info()
+df.nunique()
+test_df.nunique()
+plt.figure(figsize=(10,8))
+sns.heatmap(pd.isnull(df.T), cbar=False, cmap="viridis", linecolor='black', linewidths=0.5)
+
+pd.concat([df.isnull().sum(), 100 * df.isnull().sum()/len(df)], 
+              axis=1).rename(columns={0:'Missing Records', 1:'Percentage (%)'})
+def plot_hist(df, cols, title):
+    grid = gridspec.GridSpec(10, 2, wspace=0.5, hspace=0.5) 
+    fig = plt.figure(figsize=(15,25)) 
+    
+    for n, col in enumerate(df[cols]):         
+        ax = plt.subplot(grid[n]) 
+
+        ax.hist(df[col], bins=20) 
+        #ax.set_ylabel('Count', fontsize=12)
+        ax.set_title(f'{col} distribution', fontsize=15) 
+    
+    fig.suptitle(title, fontsize=20)
+    grid.tight_layout(fig, rect=[0, 0, 1, 0.97])
+    plt.show()
+rate_cols = [ 'serror_rate', 'srv_serror_rate', 'rerror_rate', 'srv_rerror_rate', 'same_srv_rate', 'diff_srv_rate', 'srv_diff_host_rate', 'dst_host_same_srv_rate', 'dst_host_diff_srv_rate', 'dst_host_same_src_port_rate', 'dst_host_srv_diff_host_rate', 'dst_host_serror_rate', 'dst_host_srv_serror_rate', 'dst_host_rerror_rate', 'dst_host_srv_rerror_rate']
+
+plot_hist(df, rate_cols, 'Ratio Features')
+hist_cols = [ 'duration', 'src_bytes', 'dst_bytes', 'hot', 'num_compromised', 'num_root', 'count', 'srv_count', 'dst_host_count', 'dst_host_srv_count']
+    
+plot_hist(df, hist_cols, 'Integer Features')
+df['attack_state'] = df['attack'].map(lambda x: 0 if x == 'normal' else 1)
+test_df['attack_state'] = test_df['attack'].map(lambda x: 0 if x == 'normal' else 1)
+
+df.head()
+(df.attack_state == 1).sum()/len(df) #No.of attack states in training set
+(test_df.attack_state == 1).sum()/len(df) # No.of attack states in test set
+sns.kdeplot(data=df, x="attack_state", fill=True, common_norm=False, alpha=.2, linewidth=10)
+attack_count = (df.attack_state == 1).sum()
+non_attack_count = (df.attack_state == 0).sum()
+myData = [attack_count, non_attack_count]
+
+my_labels = 'Attack Count', 'Non-Attack Count'
+plt.pie(myData, labels=my_labels, autopct='%1.1f%%')
+plt.title('Attack Ratio')
+plt.axis('equal')
+plt.show()
+DoS_attacks = ['apache2','back','land','neptune','mailbomb','pod','processtable','smurf','teardrop','udpstorm','worm']
+Probe_attacks = ['ipsweep','mscan','nmap','portsweep','saint','satan']
+U2R = ['buffer_overflow','loadmdoule','perl','ps','rootkit','sqlattack','xterm']
+R2L = ['ftp_write','guess_passwd','http_tunnel','imap','multihop','named','phf','sendmail','snmpgetattack','snmpguess','spy','warezclient','warezmaster','xclock','xsnoop']
+
+attack_labels = ['Normal','DoS','Probe','U2R','R2L']
+
+def class_attack(attack):
+    if attack in DoS_attacks:
+        attack_type = 1
+    elif attack in Probe_attacks:
+        attack_type = 2
+    elif attack in U2R:
+        attack_type = 3
+    elif attack in R2L:
+        attack_type = 4
+    else:
+        attack_type = 0       
+    return attack_type
+
+#Create the attack_class column and add it to the dataset with the numerical equivalent of each class of attack.
+attack_class = df.attack.apply(class_attack)
+df['attack_class'] = attack_class
+
+test_attack_class = test_df.attack.apply(class_attack)
+test_df['attack_class'] = test_attack_class
+
+df.head()
+df.tail() 
+Normal = (df.attack_class == 0).sum()/len(df)
+print('Normal = {:.2f}%'.format(Normal * 100))
+DoSDDoS = (df.attack_class == 1).sum()/len(df)
+print('DoS/DDoS = {:.2f}%'.format(DoSDDoS * 100))
+Probe = (df.attack_class == 2).sum()/len(df)
+print("Probe = {:.2f}%".format(Probe * 100))
+U2R = (df.attack_class == 3).sum()/len(df)
+print('U2R = {:.2f}%'.format(U2R * 100))
+R2L = (df.attack_class == 4).sum()/len(df)
+print('R2L = {:.2f}%'.format(R2L * 100))
+Normal = (test_df.attack_class == 0).sum()/len(test_df)
+print('Normal = {:.2f}%'.format(Normal * 100))
+DoSDDoS = (test_df.attack_class == 1).sum()/len(test_df)
+print('DoS/DDoS = {:.2f}%'.format(DoSDDoS * 100))
+Probe = (test_df.attack_class == 2).sum()/len(test_df)
+print("Probe = {:.2f}%".format(Probe * 100))
+U2R = (test_df.attack_class == 3).sum()/len(test_df)
+print('U2R = {:.2f}%'.format(U2R * 100))
+R2L = (test_df.attack_class == 4).sum()/len(test_df)
+print('R2L = {:.2f}%'.format(R2L * 100))
+attack_vs_class = pd.crosstab(index=df.attack_class, columns=df.attack)
+attack_vs_class
+attack_vs_DDoS = pd.crosstab(df.attack_class, df.attack == "DoS/DDoS")
+attack_vs_DDoS
+def bake_pies(data_list,labels):
+    list_length = len(data_list)
+    
+    # setup for mapping colors
+    color_list = sns.color_palette()
+    color_cycle = itertools.cycle(color_list)
+    cdict = {}
+    
+    # build the subplots
+    fig, axs = plt.subplots(1, list_length,figsize=(18,10), tight_layout=False)
+    plt.subplots_adjust(wspace=1/list_length)
+    
+    # loop through the data sets and build the charts
+    for count, data_set in enumerate(data_list): 
+        
+        # update our color mapt with new values
+        for num, value in enumerate(np.unique(data_set.index)):
+            if value not in cdict:
+                cdict[value] = next(color_cycle)
+       
+        # build the wedges
+        wedges,texts = axs[count].pie(data_set,
+                           colors=[cdict[v] for v in data_set.index])
+
+        # build the legend
+        axs[count].legend(wedges, data_set.index,
+                           title="Durum",
+                           loc="center left",
+                           bbox_to_anchor=(1, 0, 0.5, 1))
+        # set the title
+        axs[count].set_title(labels[count])
+        
+    return axs 
+DoS_DDoS_class = df.loc[df.attack_class == 1].attack.value_counts()
+probe_class = df.loc[df.attack_class == 2].attack.value_counts()
+
+flag_axs = bake_pies([DoS_DDoS_class, probe_class], ['DoS/DDoS','Probe'])
+plt.show()
+normal = (df.attack_class == 0).sum()
+dos_ddos = (df.attack_class == 1).sum()
+probe = (df.attack_class == 2).sum()
+u2r = (df.attack_class == 3).sum()
+r2l = (df.attack_class == 4).sum()
+attack_classes = [normal, dos_ddos, probe, u2r, r2l]
+
+labels = ['Normal', 'DoS/DDoS', 'Probe', 'U2R', 'R2L']
+plt.pie(attack_classes, labels=labels, autopct='%1.1f%%')
+plt.title('Attack Classes\n\n')
+plt.axis('equal')
+plt.show()
+attack_vs_protocol = pd.crosstab((df.attack_class == 1), df.protocol_type)
+attack_vs_protocol
+icmp = attack_vs_protocol.icmp.sum()
+tcp = attack_vs_protocol.tcp.sum()
+udp = attack_vs_protocol.udp.sum()
+myData = [icmp , tcp,udp]
+my_labels = 'icmp','tcp' ,'udp' 
+plt.pie(myData,labels=my_labels ,autopct='%1.1f%%')
+plt.title('protocol type\n\n')
+plt.axis('equal')
+plt.show()
+protocol_df = df.groupby(['attack', 'protocol_type']).size().reset_index(name='counts')
+protocol_pivot = protocol_df.pivot(index='attack', columns='protocol_type', values='counts')
+protocol_pivot = protocol_pivot.fillna(0)
+
+bake_pies([protocol_pivot.icmp, protocol_pivot.tcp, protocol_pivot.udp], ['icmp', 'tcp', 'udp'])
+plt.show()
+normal_services = df.loc[df.attack_class == 0].service.value_counts()
+DDoS_attack_services = df.loc[df.attack_class == 1].service.value_counts()
+
+flag_axs = bake_pies([normal_services, DDoS_attack_services], ['normal','DDoS_attack'])
+plt.show()
+service_vs_protocol = pd.crosstab(df.service, df.protocol_type,)
+service_vs_protocol
+bake_pies([service_vs_protocol.icmp, service_vs_protocol.tcp, service_vs_protocol.udp], ['icmp', 'tcp', 'udp'])
+plt.show()
+###DATA ENCODING
+df = pd.get_dummies(df,columns=['protocol_type','service','flag'],prefix="",prefix_sep="")
+test_df = pd.get_dummies(test_df,columns=['protocol_type','service','flag'],prefix="",prefix_sep="")
+df.head() 
+test_df.head()
+drop_cols = ['attack' ]  
+df.drop(drop_cols, axis=1, inplace=True)    
+drop_cols = ['attack' ]  
+test_df.drop(drop_cols, axis=1, inplace=True)  
+df.info() 
+test_df.info()
+# FEATURE SELECTION
+normal = df[df.attack_class == 0]
+normal_test= test_df[test_df.attack_class == 0]
+DDoS = df[df.attack_class == 1]
+DDoS_test= test_df[test_df.attack_class == 1 ]
+total_data = pd.concat([normal, DDoS], ignore_index=True)
+total_data_test = pd.concat([normal_test, DDoS_test], ignore_index=True)
+total_data
+total_data_test
+corr= total_data.corr()
+corr_y = abs(corr['attack_class'])
+highest_corr = corr_y[corr_y > 0.1]
+highest_corr.sort_values(ascending=True)
+corr= total_data_test.corr()
+corr_y = abs(corr['attack_class'])
+highest_corr_test = corr_y[corr_y >0.1]
+highest_corr_test.sort_values(ascending=True)
+highest_corr_columns= highest_corr.index
+highest_corr_test_columns= highest_corr_test.index
+plt.figure(figsize=(30,15))
+g=sns.heatmap(total_data[highest_corr.index].corr(),annot=True,cmap="RdYlGn")
+plt.figure(figsize=(30,15))
+g=sns.heatmap(total_data_test[highest_corr_test.index].corr(),annot=True,cmap="RdYlGn")
+drop_cols = df.loc[:,[i for i in list(df.columns) if i not in [
+'diff_srv_rate',                
+'dst_host_same_src_port_rate', 
+'REJ',
+'tcp',                            
+'ecr_i',                         
+'rerror_rate',                    
+'srv_rerror_rate',                
+'dst_host_srv_rerror_rate',       
+'dst_host_rerror_rate',           
+'smtp',                           
+'dst_host_srv_diff_host_rate',    
+'domain_u',                       
+'udp',                            
+'srv_diff_host_rate',             
+'private',                        
+'dst_host_count',                 
+'http',                           
+'logged_in',                      
+'count',
+'dst_host_srv_count',             
+'dst_host_same_srv_rate',         
+'serror_rate',                    
+'srv_serror_rate',                
+'dst_host_serror_rate',           
+'S0',                             
+'dst_host_srv_serror_rate',       
+'SF',                             
+'same_srv_rate',                 
+'attack_state',                  
+'attack_class', 
+'other',
+'icmp',                         
+'wrong_fragment',               
+'dst_host_diff_srv_rate',   
+'RSTO',
+'ftp_data',
+'Z39_50',
+'uucp'                          
+]]]
+#drop_cols = ['wrong_fragment','duration','src_bytes','dst_bytes','land','urgent','hot','num_failed_logins','num_compromised','root_shell','su_attempted','num_root','num_file_creations','num_shells','num_access_files','num_outbound_cmds','is_host_login','is_guest_login','srv_count']  
+df.drop(drop_cols, axis=1, inplace=True)  
+df
+drop_cols1 = test_df.loc[:,[i for i in list(test_df.columns) if i not in [
+'diff_srv_rate',                
+'dst_host_same_src_port_rate', 
+'REJ',
+'tcp',                            
+'ecr_i',                         
+'rerror_rate',                    
+'srv_rerror_rate',                
+'dst_host_srv_rerror_rate',       
+'dst_host_rerror_rate',           
+'smtp',                           
+'dst_host_srv_diff_host_rate',    
+'domain_u',                       
+'udp',                            
+'srv_diff_host_rate',             
+'private',                        
+'dst_host_count',                 
+'http',                           
+'logged_in',                      
+'count',                          
+'dst_host_srv_count',             
+'dst_host_same_srv_rate',         
+'serror_rate',                    
+'srv_serror_rate',                
+'dst_host_serror_rate',           
+'S0',                             
+'dst_host_srv_serror_rate',       
+'SF',                             
+'same_srv_rate',                 
+'attack_state',                 
+'attack_class', 
+'other',
+'icmp',                         
+'wrong_fragment',               
+'dst_host_diff_srv_rate',   
+'RSTO',
+'ftp_data',
+'Z39_50',
+'uucp'
+]]]
+#drop_cols = ['src_bytes','dst_bytes','land','wrong_fragment','urgent','hot','num_failed_logins','num_compromised','root_shell','su_attempted','num_root','num_file_creations','num_shells','num_access_files','num_outbound_cmds','is_host_login','is_guest_login','srv_count' ,'dst_host_same_src_port_rate']  
+test_df.drop(drop_cols1, axis=1, inplace=True)  
+test_df
+data = df.copy()
+test_data = test_df.copy()
+#  CLASSIFICATION WITHOUT NORMALIZATION
+X_train = df.drop('attack_class'  , axis = 1)
+X_test = test_df.drop('attack_class' , axis = 1)
+y_train = df['attack_class']
+y_test = test_df['attack_class']
+X_train
+y_train
+def add_predictions(data_set,predictions,y):
+    prediction_series = pd.Series(predictions, index=y.index)
+
+    # we need to add the predicted and actual outcomes to the data
+    predicted_vs_actual = data_set.assign(predicted=prediction_series)
+    original_data = predicted_vs_actual.assign(actual=y).dropna()
+    conf_matrix = confusion_matrix(original_data['actual'], 
+                                   original_data['predicted'])
+    
+    # capture rows with failed predictions
+    base_errors = original_data[original_data['actual'] != original_data['predicted']]
+    
+    # drop columns with no value
+    non_zeros = base_errors.loc[:,(base_errors != 0).any(axis=0)]
+
+    # idetify the type of error
+    false_positives = non_zeros.loc[non_zeros.actual==0]
+    false_negatives = non_zeros.loc[non_zeros.actual==1]
+
+    # put everything into an object
+    prediction_data = {'data': original_data,
+                       'confusion_matrix': conf_matrix,
+                       'errors': base_errors,
+                       'non_zeros': non_zeros,
+                       'false_positives': false_positives,
+                       'false_negatives': false_negatives}
+    
+    return prediction_data
+### RANDOM FOREST
+rm = RandomForestClassifier()
+rm.fit(X_train, y_train)
+rm_pred = rm.predict(X_test)
+
+# Tính toán độ chính xác và nhân với 100 để có giá trị phần trăm
+accuracy = metrics.accuracy_score(y_test, rm_pred) * 100
+print("Accuracy: {:.2f}%".format(accuracy))
+splt.plot_confusion_matrix(y_test, rm_pred)
+print(classification_report(y_test, rm_pred)) 
+# CLASSIFICATION WITH NORMALIZATION
+### RANDOM FOREST
+rm = RandomForestClassifier()
+rm.fit(X_train, y_train)
+rm_pred = rm.predict(X_test)
+
+# Tính toán độ chính xác và nhân với 100 để có giá trị phần trăm
+accuracy = metrics.accuracy_score(y_test, rm_pred) * 100
+print("Accuracy: {:.2f}%".format(accuracy))
+splt.plot_confusion_matrix(y_test, rm_pred)
+print(classification_report(y_test, rm_pred)) 
+
